@@ -1,0 +1,472 @@
+<!doctype html>
+<html lang="id">
+<head>
+<meta charset="utf-8">
+<title>Trip Ledger</title>
+<script src="https://cdn.tailwindcss.com/3.4.17"></script>
+<script>
+  tailwind.config = { theme: { extend: { colors: { paper: '#F5F6F2', ink: '#17202A', teal: '#0E5E5A', rust: '#B5472F', mute: '#6B7470', rule: '#DADFD8' } } } };
+</script>
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/sweetalert2@11"></script>
+<script defer src="https://cdn.jsdelivr.net/npm/alpinejs@3.14.1/dist/cdn.min.js"></script>
+<style>
+  [x-cloak] { display: none !important; }
+  body { font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Helvetica Neue", system-ui, sans-serif; -webkit-font-smoothing: antialiased; -webkit-tap-highlight-color: transparent; }
+  .num { font-variant-numeric: tabular-nums; }
+  .lbl { display: block; margin-bottom: 6px; font-size: 13px; color: #6B7470; }
+  .fld { width: 100%; background: #fff; border: 1px solid #DADFD8; border-radius: 10px; padding: 12px; font-size: 16px; color: #17202A; outline: none; }
+  .fld:focus { border-color: #0E5E5A; }
+  .chip { border: 1px solid #DADFD8; background: #fff; border-radius: 999px; padding: 8px 13px; font-size: 14px; white-space: nowrap; }
+  .chip.on { background: #17202A; border-color: #17202A; color: #F5F6F2; }
+  .seg { display: flex; border: 1px solid #DADFD8; background: #fff; border-radius: 10px; padding: 3px; }
+  .seg button { padding: 8px 10px; border-radius: 7px; font-size: 14px; color: #6B7470; }
+  .seg button.on { background: #17202A; color: #F5F6F2; }
+  .btn { width: 100%; border-radius: 12px; padding: 14px; font-weight: 600; background: #17202A; color: #F5F6F2; }
+  .btn:disabled { opacity: .5; }
+</style>
+</head>
+
+<body x-data="app()" x-cloak class="bg-paper text-ink">
+<div class="mx-auto min-h-dvh max-w-md pb-32">
+
+  <header class="px-5 pb-3 pt-[calc(env(safe-area-inset-top)+1.5rem)]">
+    <h1 class="text-2xl font-semibold tracking-tight" x-text="s.trip || 'Trip'"></h1>
+    <p class="num mt-0.5 text-sm text-mute" x-text="rangeText"></p>
+  </header>
+
+  <p x-show="loading" class="px-5 py-12 text-mute">Memuat data…</p>
+
+  <!-- RINGKASAN -->
+  <section x-show="tab === 'dash' && !loading" class="px-5">
+    <div class="border-b border-rule py-6">
+      <p class="text-sm text-mute">Sisa budget</p>
+      <p class="num mt-1 text-[40px] font-semibold leading-none tracking-tight" :class="sisa < 0 ? 'text-rust' : ''" x-text="rp(sisa)"></p>
+      <div class="mt-5 h-1.5 bg-rule"><div class="h-1.5 transition-[width] duration-500" :class="pctUsed >= 100 ? 'bg-rust' : 'bg-teal'" :style="`width:${pctUsed}%`"></div></div>
+      <p class="num mt-2 text-sm text-mute"><span x-text="pctUsed.toFixed(0)"></span>% dari <span x-text="rp(budgetTotal)"></span> sudah terpakai</p>
+    </div>
+    <dl class="num divide-y divide-rule text-[15px]">
+      <div class="flex justify-between py-3"><dt class="text-mute">Total pengeluaran</dt><dd x-text="rp(actualTotal)"></dd></div>
+      <div class="flex justify-between py-3"><dt class="text-mute">Rencana selesai</dt><dd><span x-text="planDone"></span> dari <span x-text="planCount"></span></dd></div>
+      <div class="flex justify-between py-3"><dt class="text-mute">Jumlah catatan</dt><dd x-text="exps.length"></dd></div>
+    </dl>
+
+    <h2 class="pb-2 pt-8 text-sm font-medium text-mute">Budget per kategori</h2>
+    <ul class="divide-y divide-rule">
+      <template x-for="k in byKat" :key="k.id">
+        <li class="py-3">
+          <div class="flex items-baseline justify-between gap-3 text-[15px]">
+            <span x-text="`${k.ikon || ''} ${k.nama}`"></span>
+            <span class="num text-right"><span :class="k.actual > k.budget ? 'text-rust' : ''" x-text="rp(k.actual)"></span> <span class="text-sm text-mute" x-text="'/ ' + rp(k.budget)"></span></span>
+          </div>
+          <div class="mt-2 h-1 bg-rule"><div class="h-1" :class="k.actual > k.budget ? 'bg-rust' : 'bg-teal'" :style="`width:${k.pct}%`"></div></div>
+        </li>
+      </template>
+    </ul>
+
+    <h2 class="pb-2 pt-8 text-sm font-medium text-mute">Pengeluaran harian</h2>
+    <div class="h-56"><canvas x-ref="daily"></canvas></div>
+    <p x-show="!byDay.length" class="py-4 text-sm text-mute">Belum ada pengeluaran.</p>
+
+    <h2 class="pb-2 pt-8 text-sm font-medium text-mute">Per destinasi</h2>
+    <ul class="divide-y divide-rule">
+      <template x-for="d in byDest" :key="d.nama">
+        <li class="flex justify-between py-3 text-[15px]"><span x-text="d.nama"></span><span class="num" x-text="rp(d.actual)"></span></li>
+      </template>
+    </ul>
+    <p x-show="!byDest.length" class="py-4 text-sm text-mute">Belum ada pengeluaran per destinasi.</p>
+  </section>
+
+  <!-- RENCANA -->
+  <section x-show="tab === 'plan' && !loading" class="px-5">
+    <div class="-mx-5 flex gap-2 overflow-x-auto px-5 pb-1 pt-2">
+      <template x-for="f in ['Semua', 'Rencana', 'Selesai', 'Batal']" :key="f">
+        <button class="chip" :class="planFilter === f ? 'on' : ''" @click="planFilter = f" x-text="f"></button>
+      </template>
+    </div>
+    <template x-for="g in planGroups" :key="g.tgl">
+      <div>
+        <h3 class="pb-1 pt-6 text-sm font-medium text-mute" x-text="fmtDate(g.tgl)"></h3>
+        <ul class="divide-y divide-rule">
+          <template x-for="p in g.items" :key="p.id">
+            <li class="flex items-start gap-3 py-3">
+              <button class="mt-0.5 h-6 w-6 shrink-0 rounded-full border-2" :class="p.status === 'Selesai' ? 'border-teal bg-teal' : 'border-mute'" aria-label="Tandai selesai" @click="toggleDone(p)"></button>
+              <button class="min-w-0 flex-1 text-left" @click="openEd('plan', p)">
+                <span class="block text-[15px]" :class="p.status === 'Selesai' ? 'text-mute line-through' : ''" x-text="p.kegiatan"></span>
+                <span class="block truncate text-sm text-mute" x-text="[p.jam, destName(p.destinasi_id), catName(p.kategori_id), p.status !== 'Rencana' ? p.status : ''].filter(Boolean).join(', ')"></span>
+                <span class="mt-2 block h-1 bg-rule"><span class="block h-1" :class="p.aktual > p.estimasi_idr && p.estimasi_idr > 0 ? 'bg-rust' : 'bg-teal'" :style="`width:${pctOf(p.aktual, p.estimasi_idr)}%`"></span></span>
+              </button>
+              <span class="num shrink-0 text-right text-[15px]">
+                <span class="block" x-text="rp(p.estimasi_idr)"></span>
+                <span class="block text-sm text-mute" x-text="'aktual ' + rp(p.aktual)"></span>
+              </span>
+            </li>
+          </template>
+        </ul>
+      </div>
+    </template>
+    <p x-show="!planGroups.length" class="py-12 text-center text-mute">Belum ada rencana. Susun dari tombol di bawah.</p>
+    <button class="mt-8 w-full rounded-xl border border-ink py-3 font-semibold" @click="openEd('plan')">Tambah rencana</button>
+  </section>
+
+  <!-- PENGELUARAN -->
+  <section x-show="tab === 'exp' && !loading" class="px-5">
+    <div class="flex items-baseline justify-between border-b border-rule py-4">
+      <span class="text-sm text-mute">Total</span>
+      <span class="num text-xl font-semibold" x-text="rp(actualTotal)"></span>
+    </div>
+    <template x-for="g in expGroups" :key="g.tgl">
+      <div>
+        <h3 class="flex justify-between pb-1 pt-6 text-sm font-medium text-mute"><span x-text="fmtDate(g.tgl)"></span><span class="num" x-text="rp(g.total)"></span></h3>
+        <ul class="divide-y divide-rule">
+          <template x-for="e in g.items" :key="e.id">
+            <li>
+              <button class="flex w-full items-center gap-3 py-3 text-left" @click="openEd('exp', e)">
+                <span class="w-7 text-center text-xl" x-text="catIcon(e.kategori_id) || '🧾'"></span>
+                <span class="min-w-0 flex-1">
+                  <span class="block truncate text-[15px]" x-text="e.keterangan || catName(e.kategori_id) || 'Pengeluaran'"></span>
+                  <span class="block truncate text-sm text-mute" x-text="[destName(e.destinasi_id), e.pembayaran].filter(Boolean).join(', ')"></span>
+                </span>
+                <span class="num shrink-0 text-right text-[15px]">
+                  <span class="block" x-text="rp(e.nominal_idr)"></span>
+                  <span class="block text-sm text-mute" x-show="e.mata_uang !== 'IDR'" x-text="money(e.nominal, e.mata_uang)"></span>
+                </span>
+              </button>
+            </li>
+          </template>
+        </ul>
+      </div>
+    </template>
+    <p x-show="!exps.length" class="py-12 text-center text-mute">Belum ada pengeluaran. Tekan + di bawah untuk mencatat.</p>
+  </section>
+
+  <!-- DATA (MASTER) -->
+  <section x-show="tab === 'data' && !loading" class="space-y-3 px-5">
+    <h2 class="pt-4 text-sm font-medium text-mute">Pengaturan trip</h2>
+    <label class="block"><span class="lbl">Nama trip</span><input class="fld" x-model="s.trip"></label>
+    <div class="grid grid-cols-2 gap-3">
+      <label><span class="lbl">Mulai</span><input type="date" class="fld" x-model="s.mulai"></label>
+      <label><span class="lbl">Selesai</span><input type="date" class="fld" x-model="s.selesai"></label>
+    </div>
+    <div class="grid grid-cols-2 gap-3">
+      <label><span class="lbl">Kurs 1 RM ke IDR</span><input type="number" inputmode="decimal" step="any" class="fld" x-model.number="s.kurs.MYR"></label>
+      <label><span class="lbl">Kurs 1 USD ke IDR</span><input type="number" inputmode="decimal" step="any" class="fld" x-model.number="s.kurs.USD"></label>
+    </div>
+    <button class="btn" :disabled="busy" @click="saveSettings()">Simpan pengaturan</button>
+
+    <div class="flex items-center justify-between pt-7">
+      <h2 class="text-sm font-medium text-mute">Destinasi</h2>
+      <button class="text-sm font-semibold text-teal" @click="openEd('dest')">+ Tambah</button>
+    </div>
+    <ul class="divide-y divide-rule">
+      <template x-for="d in dests" :key="d.id">
+        <li><button class="w-full py-3 text-left" @click="openEd('dest', d)"><span class="block text-[15px]" x-text="d.nama"></span><span class="block text-sm text-mute" x-text="d.lokasi"></span></button></li>
+      </template>
+    </ul>
+
+    <div class="flex items-center justify-between pt-7">
+      <h2 class="text-sm font-medium text-mute">Kategori dan budget</h2>
+      <button class="text-sm font-semibold text-teal" @click="openEd('cat')">+ Tambah</button>
+    </div>
+    <ul class="divide-y divide-rule pb-4">
+      <template x-for="k in cats" :key="k.id">
+        <li><button class="flex w-full justify-between py-3 text-left" @click="openEd('cat', k)"><span class="text-[15px]" x-text="(k.ikon || '') + ' ' + k.nama"></span><span class="num text-sm text-mute" x-text="rp(k.budget_idr)"></span></button></li>
+      </template>
+    </ul>
+  </section>
+</div>
+
+<!-- NAV BAWAH -->
+<nav class="fixed inset-x-0 bottom-0 z-40 mx-auto max-w-md border-t border-rule bg-paper/95 pb-[env(safe-area-inset-bottom)] backdrop-blur">
+  <div class="grid grid-cols-5 items-center text-[11px] font-medium">
+    <button class="py-3" :class="tab === 'dash' ? 'text-ink' : 'text-mute'" @click="tab = 'dash'">Ringkasan</button>
+    <button class="py-3" :class="tab === 'plan' ? 'text-ink' : 'text-mute'" @click="tab = 'plan'">Rencana</button>
+    <div class="flex justify-center">
+      <button class="-mt-6 grid h-14 w-14 place-items-center rounded-full bg-teal text-3xl leading-none text-paper" aria-label="Catat pengeluaran" @click="openEd('exp')">+</button>
+    </div>
+    <button class="py-3" :class="tab === 'exp' ? 'text-ink' : 'text-mute'" @click="tab = 'exp'">Pengeluaran</button>
+    <button class="py-3" :class="tab === 'data' ? 'text-ink' : 'text-mute'" @click="tab = 'data'">Data</button>
+  </div>
+</nav>
+
+<!-- FORM (BOTTOM SHEET) -->
+<div x-show="ed.open" x-cloak class="fixed inset-0 z-50">
+  <div class="absolute inset-0 bg-ink/30" @click="ed.open = false"></div>
+  <form class="absolute inset-x-0 bottom-0 mx-auto max-h-[92dvh] max-w-md overflow-y-auto rounded-t-2xl bg-paper px-5 pb-[max(1.25rem,env(safe-area-inset-bottom))] pt-4" @submit.prevent="save()">
+    <div class="mb-5 flex items-center justify-between">
+      <button type="button" class="text-teal" @click="ed.open = false">Batal</button>
+      <h2 class="font-semibold" x-text="ed.title"></h2>
+      <span class="w-10"></span>
+    </div>
+
+    <div class="space-y-5">
+      <!-- nominal (pengeluaran) -->
+      <div x-show="isExp">
+        <span class="lbl">Nominal</span>
+        <div class="flex items-center gap-2">
+          <div class="seg shrink-0">
+            <template x-for="c in ['IDR', 'MYR', 'USD']" :key="c">
+              <button type="button" :class="ed.f.mata_uang === c ? 'on' : ''" @click="setCur(c)" x-text="c"></button>
+            </template>
+          </div>
+          <input type="number" inputmode="decimal" step="any" placeholder="0" class="fld num text-2xl font-semibold" x-model.number="ed.f.nominal">
+        </div>
+      </div>
+      <div x-show="isExp && ed.f.mata_uang !== 'IDR'" class="grid grid-cols-2 gap-3">
+        <label><span class="lbl">Kurs ke IDR</span><input type="number" inputmode="decimal" step="any" class="fld" x-model.number="ed.f.kurs"></label>
+        <div><span class="lbl">Setara</span><p class="num py-3 text-[17px]" x-text="rp((ed.f.nominal || 0) * (ed.f.kurs || 0))"></p></div>
+      </div>
+
+      <!-- tanggal & jam (pengeluaran dan rencana) -->
+      <div x-show="isTx" class="grid grid-cols-2 gap-3">
+        <label><span class="lbl">Tanggal</span><input type="date" class="fld" x-model="ed.f.tanggal"></label>
+        <label x-show="isPlan"><span class="lbl">Jam</span><input type="time" class="fld" x-model="ed.f.jam"></label>
+      </div>
+
+      <label x-show="isPlan" class="block"><span class="lbl">Kegiatan</span><input class="fld" placeholder="mis. Naik Petronas Twin Tower" x-model="ed.f.kegiatan"></label>
+      <label x-show="isExp" class="block"><span class="lbl">Keterangan</span><input class="fld" placeholder="mis. makan siang di Jalan Alor" x-model="ed.f.keterangan"></label>
+      <label x-show="isExp" class="block"><span class="lbl">Dari rencana (opsional)</span>
+        <select class="fld" :value="ed.f.rencana_id" @change="ed.f.rencana_id = $event.target.value; pickPlan()">
+          <option value="">Tidak ada</option>
+          <template x-for="p in openPlans" :key="p.id"><option :value="p.id" x-text="p.kegiatan"></option></template>
+        </select>
+      </label>
+
+      <div x-show="isTx">
+        <span class="lbl">Kategori</span>
+        <div class="flex flex-wrap gap-2">
+          <template x-for="k in cats" :key="k.id">
+            <button type="button" class="chip" :class="ed.f.kategori_id === k.id ? 'on' : ''" @click="ed.f.kategori_id = k.id"><span x-text="k.ikon"></span> <span x-text="k.nama"></span></button>
+          </template>
+        </div>
+      </div>
+      <label x-show="isTx" class="block"><span class="lbl">Destinasi</span>
+        <select class="fld" x-model="ed.f.destinasi_id">
+          <option value="">Belum dipilih</option>
+          <template x-for="d in dests" :key="d.id"><option :value="d.id" x-text="d.nama"></option></template>
+        </select>
+      </label>
+      <div x-show="isExp">
+        <span class="lbl">Pembayaran</span>
+        <div class="flex flex-wrap gap-2">
+          <template x-for="m in payments" :key="m">
+            <button type="button" class="chip" :class="ed.f.pembayaran === m ? 'on' : ''" @click="ed.f.pembayaran = m" x-text="m"></button>
+          </template>
+        </div>
+      </div>
+
+      <!-- rencana: estimasi, status, catatan -->
+      <div x-show="isPlan" class="grid grid-cols-2 gap-3">
+        <label><span class="lbl">Estimasi (IDR)</span><input type="number" inputmode="numeric" class="fld" x-model.number="ed.f.estimasi_idr"></label>
+        <label><span class="lbl">Status</span>
+          <select class="fld" x-model="ed.f.status"><option>Rencana</option><option>Selesai</option><option>Batal</option></select>
+        </label>
+      </div>
+      <label x-show="isPlan" class="block"><span class="lbl">Catatan</span><input class="fld" x-model="ed.f.catatan"></label>
+
+      <!-- destinasi -->
+      <div x-show="isDest" class="space-y-5">
+        <label class="block"><span class="lbl">Nama destinasi</span><input class="fld" placeholder="mis. Batu Caves" x-model="ed.f.nama"></label>
+        <label class="block"><span class="lbl">Lokasi / area</span><input class="fld" x-model="ed.f.lokasi"></label>
+      </div>
+
+      <!-- kategori -->
+      <div x-show="isCat" class="space-y-5">
+        <div class="grid grid-cols-[84px_1fr] gap-3">
+          <label><span class="lbl">Ikon</span><input class="fld text-center" maxlength="4" x-model="ed.f.ikon"></label>
+          <label><span class="lbl">Nama kategori</span><input class="fld" x-model="ed.f.nama"></label>
+        </div>
+        <label class="block"><span class="lbl">Budget (IDR)</span><input type="number" inputmode="numeric" class="fld" x-model.number="ed.f.budget_idr"></label>
+      </div>
+
+      <div class="space-y-3 pt-2">
+        <button class="btn" type="submit" :disabled="busy" x-text="busy ? 'Menyimpan…' : 'Simpan'"></button>
+        <button type="button" x-show="ed.f.id" class="w-full py-3 text-rust" @click="removeEd()">Hapus</button>
+      </div>
+    </div>
+  </form>
+</div>
+
+<script>
+document.addEventListener('alpine:init', () => {
+  Alpine.data('app', () => {
+    let chart;
+    const num = v => Number(v) || 0;
+    const today = () => { const d = new Date(); d.setMinutes(d.getMinutes() - d.getTimezoneOffset()); return d.toISOString().slice(0, 10); };
+    const BLANK = {
+      exp: { id: '', tanggal: '', nominal: '', mata_uang: 'IDR', kurs: 1, destinasi_id: '', kategori_id: '', keterangan: '', pembayaran: 'Tunai', rencana_id: '' },
+      plan: { id: '', tanggal: '', jam: '09:00', destinasi_id: '', kategori_id: '', kegiatan: '', estimasi_idr: '', status: 'Rencana', catatan: '' },
+      dest: { id: '', nama: '', lokasi: '' },
+      cat: { id: '', ikon: '', nama: '', budget_idr: '' },
+    };
+    const TITLES = {
+      exp: ['Catat pengeluaran', 'Ubah pengeluaran'],
+      plan: ['Tambah rencana', 'Ubah rencana'],
+      dest: ['Tambah destinasi', 'Ubah destinasi'],
+      cat: ['Tambah kategori', 'Ubah kategori'],
+    };
+    const TABLE = { exp: 'realisasi', plan: 'rencana', dest: 'destinasi', cat: 'kategori' };
+
+    return {
+      tab: 'dash', loading: true, busy: false, planFilter: 'Semua',
+      s: { trip: '', mulai: '', selesai: '', kurs: { IDR: 1, MYR: 0, USD: 0 } },
+      cats: [], dests: [], plans: [], exps: [], payments: [],
+      ed: { open: false, kind: 'exp', title: '', f: {} },
+
+      /* ----- getter ----- */
+      get isExp() { return this.ed.kind === 'exp'; },
+      get isPlan() { return this.ed.kind === 'plan'; },
+      get isTx() { return this.isExp || this.isPlan; },
+      get isDest() { return this.ed.kind === 'dest'; },
+      get isCat() { return this.ed.kind === 'cat'; },
+      get rangeText() { return this.s.mulai && this.s.selesai ? `${this.fmtDate(this.s.mulai)} – ${this.fmtDate(this.s.selesai)}` : ''; },
+      get budgetTotal() { return this.cats.reduce((t, c) => t + num(c.budget_idr), 0); },
+      get actualTotal() { return this.exps.reduce((t, e) => t + num(e.nominal_idr), 0); },
+      get sisa() { return this.budgetTotal - this.actualTotal; },
+      get pctUsed() { return this.pctOf(this.actualTotal, this.budgetTotal); },
+      get planCount() { return this.plans.filter(p => p.status !== 'Batal').length; },
+      get planDone() { return this.plans.filter(p => p.status === 'Selesai').length; },
+      get openPlans() { return this.plans.filter(p => p.status === 'Rencana'); },
+      get byKat() {
+        return this.cats.map(c => {
+          const actual = this.sumBy(e => e.kategori_id === c.id);
+          const budget = num(c.budget_idr);
+          return { ...c, actual, budget, pct: this.pctOf(actual, budget) };
+        });
+      },
+      get byDest() {
+        return this.dests
+          .map(d => ({ nama: d.nama, actual: this.sumBy(e => e.destinasi_id === d.id) }))
+          .filter(x => x.actual > 0)
+          .sort((a, b) => b.actual - a.actual);
+      },
+      get byDay() {
+        const m = {};
+        this.exps.forEach(e => { m[e.tanggal] = (m[e.tanggal] || 0) + num(e.nominal_idr); });
+        return Object.keys(m).sort().map(tanggal => ({ tanggal, actual: m[tanggal] }));
+      },
+      get planGroups() {
+        const list = this.plans
+          .filter(p => this.planFilter === 'Semua' || p.status === this.planFilter)
+          .sort((a, b) => (a.tanggal + a.jam).localeCompare(b.tanggal + b.jam));
+        return this.group(list);
+      },
+      get expGroups() { return this.group([...this.exps].reverse()).reverse(); },
+
+      /* ----- lifecycle (Alpine memanggil init() otomatis) ----- */
+      init() {
+        this.$watch('tab', t => { if (t === 'dash') this.$nextTick(() => this.drawChart()); });
+        this.load();
+      },
+
+      /* ----- komunikasi ke server ----- */
+      api(fn, ...args) {
+        const clean = args.map(a => JSON.parse(JSON.stringify(a ?? null)));
+        this.busy = true;
+        return new Promise((ok, fail) => google.script.run.withSuccessHandler(ok).withFailureHandler(fail)[fn](...clean))
+          .finally(() => { this.busy = false; });
+      },
+      async load() {
+        try {
+          const d = await this.api('getData');
+          this.s = d.settings;
+          this.cats = d.kategori;
+          this.dests = d.destinasi;
+          this.plans = d.rencana;
+          this.exps = d.realisasi;
+          this.payments = d.payments;
+          this.loading = false;
+          this.$nextTick(() => this.drawChart());
+        } catch (e) { this.loading = false; this.fail(e); }
+      },
+      async save() {
+        try {
+          await this.api('saveRecord', TABLE[this.ed.kind], this.ed.f);
+          this.ed.open = false;
+          this.toast('Tersimpan');
+          await this.load();
+        } catch (e) { this.fail(e); }
+      },
+      async removeEd() {
+        const r = await Swal.fire({ title: 'Hapus data ini?', text: 'Data yang dihapus tidak bisa dikembalikan.', icon: 'warning', showCancelButton: true, confirmButtonText: 'Hapus', cancelButtonText: 'Batal', confirmButtonColor: '#B5472F' });
+        if (!r.isConfirmed) return;
+        try {
+          await this.api('removeRecord', TABLE[this.ed.kind], this.ed.f.id);
+          this.ed.open = false;
+          this.toast('Dihapus');
+          await this.load();
+        } catch (e) { this.fail(e); }
+      },
+      async toggleDone(p) {
+        try {
+          await this.api('saveRecord', 'rencana', { ...p, status: p.status === 'Selesai' ? 'Rencana' : 'Selesai' });
+          await this.load();
+        } catch (e) { this.fail(e); }
+      },
+      async saveSettings() {
+        try {
+          await this.api('saveSettings', this.s);
+          this.toast('Pengaturan tersimpan');
+          await this.load();
+        } catch (e) { this.fail(e); }
+      },
+
+      /* ----- form ----- */
+      openEd(kind, item) {
+        const f = item ? { ...item } : { ...BLANK[kind], tanggal: (kind === 'plan' && this.s.mulai) || today() };
+        this.ed = { open: true, kind, title: TITLES[kind][item ? 1 : 0], f };
+      },
+      setCur(c) {
+        this.ed.f.mata_uang = c;
+        this.ed.f.kurs = this.s.kurs[c] || 1;
+      },
+      pickPlan() {
+        const p = this.plans.find(x => x.id === this.ed.f.rencana_id);
+        if (p) Object.assign(this.ed.f, { destinasi_id: p.destinasi_id, kategori_id: p.kategori_id, keterangan: this.ed.f.keterangan || p.kegiatan });
+      },
+
+      /* ----- format & util ----- */
+      rp(n) { return 'Rp ' + Math.round(num(n)).toLocaleString('id-ID'); },
+      money(n, c) { return c === 'IDR' ? this.rp(n) : (c === 'MYR' ? 'RM ' : 'US$ ') + num(n).toLocaleString('en-US', { maximumFractionDigits: 2 }); },
+      fmtDate(t) { return t ? new Date(t + 'T00:00:00').toLocaleDateString('id-ID', { weekday: 'short', day: 'numeric', month: 'short' }) : '-'; },
+      pctOf(a, b) { return b > 0 ? Math.min(100, num(a) / b * 100) : 0; },
+      sumBy(fn) { return this.exps.filter(fn).reduce((t, e) => t + num(e.nominal_idr), 0); },
+      group(list) {
+        const m = {};
+        list.forEach(x => { (m[x.tanggal] = m[x.tanggal] || []).push(x); });
+        return Object.keys(m).sort().map(tgl => ({ tgl, items: m[tgl], total: m[tgl].reduce((t, x) => t + num(x.nominal_idr), 0) }));
+      },
+      catName(id) { return this.cats.find(c => c.id === id)?.nama || ''; },
+      catIcon(id) { return this.cats.find(c => c.id === id)?.ikon || ''; },
+      destName(id) { return this.dests.find(d => d.id === id)?.nama || ''; },
+      toast(title) { Swal.fire({ toast: true, position: 'top', icon: 'success', title, showConfirmButton: false, timer: 1400 }); },
+      fail(e) { Swal.fire({ icon: 'error', title: 'Belum tersimpan', text: e?.message || String(e), confirmButtonColor: '#17202A' }); },
+
+      drawChart() {
+        const el = this.$refs.daily;
+        if (!el || this.tab !== 'dash' || typeof Chart === 'undefined') return;
+        const d = this.byDay;
+        chart?.destroy();
+        chart = new Chart(el, {
+          type: 'bar',
+          data: {
+            labels: d.map(x => x.tanggal.slice(8)),
+            datasets: [{ data: d.map(x => x.actual), backgroundColor: '#0E5E5A', borderRadius: 3 }],
+          },
+          options: {
+            responsive: true,
+            maintainAspectRatio: false,
+            plugins: { legend: { display: false } },
+            scales: {
+              x: { grid: { display: false } },
+              y: { ticks: { callback: v => (v / 1e6).toFixed(1) + ' jt' } },
+            },
+          },
+        });
+      },
+    };
+  });
+});
+</script>
+</body>
+</html>
