@@ -1,0 +1,373 @@
+<!-- MODUL DOKUMEN. Disisipkan ke Index.html dengan <?!= include('DocsPanel'); ?> -->
+<style>
+  .zb { height: 44px; min-width: 44px; padding: 0 12px; border-radius: 12px; border: 1px solid #DADFD8; background: #fff; font-size: 18px; color: #17202A; }
+</style>
+<section x-data="docs()" x-show="tab === 'docs'" @open-docs.window="refresh()" class="px-5">
+
+  <div class="pb-3 pt-4">
+    <button class="btn" :disabled="busy" @click="$refs.file.click()">Tambah dokumen</button>
+    <input type="file" accept="image/*,application/pdf" class="sr-only" x-ref="file" @change="pick($event)">
+  </div>
+
+  <div class="-mx-5 flex gap-2 overflow-x-auto px-5 pb-3">
+    <template x-for="t in filters" :key="t">
+      <button class="chip" :class="jenis === t ? 'on' : ''" @click="jenis = t" x-text="t"></button>
+    </template>
+  </div>
+
+  <ul class="divide-y divide-rule">
+    <template x-for="d in shown" :key="d.id">
+      <li>
+        <button class="flex w-full items-center gap-3 py-3 text-left" @click="open(d)">
+          <span class="grid h-11 w-11 shrink-0 place-items-center rounded-lg border border-rule bg-white text-xl" x-text="icon[d.jenis] || '📎'"></span>
+          <span class="min-w-0 flex-1">
+            <span class="block truncate text-[15px]" x-text="d.judul"></span>
+            <span class="block truncate text-sm text-mute" x-text="[d.jenis, d.pemilik, size(d.ukuran)].filter(Boolean).join(', ')"></span>
+          </span>
+          <span class="text-mute">›</span>
+        </button>
+      </li>
+    </template>
+  </ul>
+  <p x-show="!shown.length" class="py-12 text-center text-mute">Belum ada dokumen. Simpan KTP, paspor, tiket, dan bukti hotel di sini.</p>
+
+  <!-- VIEWER -->
+  <div x-show="view.open" x-cloak class="fixed inset-0 z-[60] flex flex-col bg-paper text-ink">
+    <div class="flex items-center justify-between gap-3 border-b border-rule px-4 pb-3 pt-[calc(env(safe-area-inset-top)+0.75rem)]">
+      <button class="text-teal" @click="closeView()">Tutup</button>
+      <p class="min-w-0 truncate text-[15px] font-medium" x-text="view.name"></p>
+      <div class="flex shrink-0 gap-4 text-[15px] text-teal">
+        <button @click="download()">Unduh</button>
+        <button @click="share()">Bagikan</button>
+      </div>
+    </div>
+
+    <div x-ref="stage" class="relative min-h-0 flex-1 overflow-hidden bg-[#E4E7E1]" style="touch-action: none;"
+         @touchstart="touchStart($event)" @touchmove="touchMove($event)" @touchend="touchEnd($event)">
+      <p x-show="view.busy" class="absolute inset-x-0 top-10 text-center text-mute">Memuat dokumen…</p>
+      <p x-show="view.error" class="absolute inset-x-0 top-10 px-6 text-center text-rust" x-text="view.error"></p>
+      <div x-ref="content" class="absolute left-0 top-0 origin-top-left select-none" style="width: 100%;">
+        <img x-show="!view.isPdf && view.url" :src="view.url" alt="" draggable="false" class="block w-full" @load="place()">
+        <div x-ref="pages"></div>
+      </div>
+    </div>
+
+    <div class="flex items-center justify-center gap-2 border-t border-rule bg-paper px-4 pb-[max(0.75rem,env(safe-area-inset-bottom))] pt-3">
+      <button class="zb" aria-label="Perkecil" @click="zoomBy(0.8)">−</button>
+      <button class="zb num w-20" @click="resetZoom()" x-text="Math.round(view.zoom * 100) + '%'"></button>
+      <button class="zb" aria-label="Perbesar" @click="zoomBy(1.25)">+</button>
+      <button class="zb ml-3" @click="editFromView()">Info</button>
+    </div>
+  </div>
+
+  <!-- FORM SIMPAN / UBAH INFO -->
+  <div x-show="form.open" x-cloak class="fixed inset-0 z-[70]">
+    <div class="absolute inset-0 bg-ink/30" @click="form.open = false"></div>
+    <form class="absolute inset-x-0 bottom-0 mx-auto max-h-[92dvh] max-w-md overflow-y-auto rounded-t-2xl bg-paper px-5 pb-[max(1.25rem,env(safe-area-inset-bottom))] pt-4" @submit.prevent="save()">
+      <div class="mb-5 flex items-center justify-between">
+        <button type="button" class="text-teal" @click="form.open = false">Batal</button>
+        <h2 class="font-semibold" x-text="form.title"></h2>
+        <span class="w-10"></span>
+      </div>
+      <div class="space-y-5">
+        <img x-show="form.preview" :src="form.preview" alt="" class="mx-auto max-h-40 rounded-lg border border-rule">
+        <p x-show="form.mime === 'application/pdf'" class="text-sm text-mute">File PDF siap disimpan.</p>
+        <div>
+          <span class="lbl">Jenis dokumen</span>
+          <div class="flex flex-wrap gap-2">
+            <template x-for="t in types" :key="t">
+              <button type="button" class="chip" :class="form.jenis === t ? 'on' : ''" @click="form.jenis = t" x-text="icon[t] + ' ' + t"></button>
+            </template>
+          </div>
+        </div>
+        <label class="block"><span class="lbl">Nama dokumen</span><input class="fld" x-model="form.judul"></label>
+        <label class="block"><span class="lbl">Untuk siapa (opsional)</span><input class="fld" placeholder="mis. Candra" x-model="form.pemilik"></label>
+        <label class="block"><span class="lbl">Catatan (opsional)</span><input class="fld" placeholder="mis. nomor booking, nomor kursi" x-model="form.catatan"></label>
+        <div class="space-y-3 pt-2">
+          <button class="btn" type="submit" :disabled="busy" x-text="busy ? 'Menyimpan…' : 'Simpan'"></button>
+          <button type="button" x-show="form.id" class="w-full py-3 text-rust" @click="removeDoc()">Hapus dokumen</button>
+        </div>
+      </div>
+    </form>
+  </div>
+</section>
+
+<script>
+document.addEventListener('alpine:init', () => {
+  Alpine.data('docs', () => {
+    const ICON = { KTP: '🪪', Paspor: '🛂', Tiket: '✈️', Hotel: '🏨', Asuransi: '🛡️', Visa: '📄', Lainnya: '📎' };
+    const PDFJS = 'https://cdn.jsdelivr.net/npm/pdfjs-dist@3.11.174/build';
+    const MAX = 10 * 1024 * 1024;
+    const MAX_ZOOM = 4;
+
+    // State viewer disimpan di luar Alpine (tidak reaktif) agar gesture tidak memicu render ulang.
+    let bytes = null, blob = null, pdf = null, pdfLib = null;
+    let stageEl = null, contentEl = null, pagesEl = null;
+    let cz = 1, tx = 0, ty = 0;              // cz = zoom yang sudah di-commit ke layout; tx/ty = geser (px)
+    let pinch = null, drag = null, lastTap = 0, token = 0, timer = null;
+
+    const b64ToBytes = b64 => Uint8Array.from(atob(b64), c => c.charCodeAt(0));
+    const readAsDataURL = f => new Promise((ok, err) => { const r = new FileReader(); r.onload = () => ok(r.result); r.onerror = err; r.readAsDataURL(f); });
+    const rel = (x, y) => { const r = stageEl.getBoundingClientRect(); return { x: x - r.left, y: y - r.top }; };
+    const pt = t => rel(t[0].clientX, t[0].clientY);
+    const mid = t => rel((t[0].clientX + t[1].clientX) / 2, (t[0].clientY + t[1].clientY) / 2);
+    const dist = t => Math.hypot(t[0].clientX - t[1].clientX, t[0].clientY - t[1].clientY);
+
+    // Foto dari iPhone dikecilkan ke maks 2000 px (JPEG 85%). PDF dibiarkan apa adanya.
+    async function prepare(file) {
+      if (!file.type.startsWith('image/')) {
+        return { mime: 'application/pdf', name: file.name, b64: (await readAsDataURL(file)).split(',')[1], preview: '' };
+      }
+      const img = await new Promise((ok, err) => { const i = new Image(); i.onload = () => ok(i); i.onerror = err; i.src = URL.createObjectURL(file); });
+      const k = Math.min(1, 2000 / Math.max(img.width, img.height));
+      const c = document.createElement('canvas');
+      c.width = Math.round(img.width * k);
+      c.height = Math.round(img.height * k);
+      const g = c.getContext('2d');
+      g.fillStyle = '#fff';
+      g.fillRect(0, 0, c.width, c.height);
+      g.drawImage(img, 0, 0, c.width, c.height);
+      const url = c.toDataURL('image/jpeg', 0.85);
+      return { mime: 'image/jpeg', name: file.name.replace(/\.[^.]+$/, '') + '.jpg', b64: url.split(',')[1], preview: url };
+    }
+
+    // PDF.js v3 (UMD). Worker dimuat sebagai blob supaya tidak diblokir lintas-domain.
+    function loadPdfJs() {
+      if (pdfLib) return Promise.resolve(pdfLib);
+      return new Promise((ok, err) => {
+        const s = document.createElement('script');
+        s.src = PDFJS + '/pdf.min.js';
+        s.onload = () => ok();
+        s.onerror = err;
+        document.head.appendChild(s);
+      }).then(async () => {
+        const code = await (await fetch(PDFJS + '/pdf.worker.min.js')).text();
+        window.pdfjsLib.GlobalWorkerOptions.workerSrc = URL.createObjectURL(new Blob([code], { type: 'text/javascript' }));
+        pdfLib = window.pdfjsLib;
+        return pdfLib;
+      });
+    }
+
+    // Render semua halaman ke fragment dulu, baru ditampilkan sekaligus (tanpa kedip).
+    async function buildPages(parent, width) {
+      const dpr = Math.min(window.devicePixelRatio || 1, 3);
+      const r = Math.min(dpr, 2600 / width); // batasi ukuran canvas agar memori iPhone aman
+      for (let n = 1; n <= pdf.numPages; n++) {
+        const page = await pdf.getPage(n);
+        const base = width / page.getViewport({ scale: 1 }).width;
+        const vp = page.getViewport({ scale: base * r });
+        const c = document.createElement('canvas');
+        c.width = vp.width;
+        c.height = vp.height;
+        c.style.cssText = 'display:block;width:100%;height:auto;margin:0 0 12px;background:#fff';
+        parent.appendChild(c);
+        await page.render({ canvasContext: c.getContext('2d'), viewport: vp }).promise;
+      }
+    }
+
+    return {
+      items: [], jenis: 'Semua', busy: false, icon: ICON, types: Object.keys(ICON),
+      form: { open: false, title: '', id: '', jenis: 'Lainnya', judul: '', pemilik: '', catatan: '', nama_file: '', mime: '', b64: '', preview: '' },
+      view: { open: false, id: '', name: '', file: '', mime: '', url: '', isPdf: false, zoom: 1, busy: false, error: '' },
+
+      get filters() { return ['Semua', ...this.types]; },
+      get shown() {
+        return this.items
+          .filter(d => this.jenis === 'Semua' || d.jenis === this.jenis)
+          .sort((a, b) => (b.dibuat || '').localeCompare(a.dibuat || ''));
+      },
+      size(n) { return n > 1048576 ? (n / 1048576).toFixed(1) + ' MB' : Math.max(1, Math.round(n / 1024)) + ' KB'; },
+      call(fn, ...args) {
+        const clean = args.map(a => JSON.parse(JSON.stringify(a ?? null)));
+        return new Promise((ok, fail) => google.script.run.withSuccessHandler(ok).withFailureHandler(fail)[fn](...clean));
+      },
+      fail(e) { Swal.fire({ icon: 'error', title: 'Gagal', text: e?.message || String(e), confirmButtonColor: '#17202A' }); },
+      async refresh() {
+        try { this.items = await this.call('listDocs'); } catch (e) { this.fail(e); }
+      },
+
+      /* ----- upload & info ----- */
+      async pick(e) {
+        const file = e.target.files[0];
+        e.target.value = '';
+        if (!file) return;
+        if (file.size > MAX) return this.fail(new Error('File lebih dari 10 MB. Kecilkan dulu lalu coba lagi.'));
+        try {
+          const r = await prepare(file);
+          this.form = {
+            open: true, title: 'Simpan dokumen', id: '', jenis: 'Lainnya',
+            judul: file.name.replace(/\.[^.]+$/, ''), pemilik: '', catatan: '',
+            nama_file: r.name, mime: r.mime, b64: r.b64, preview: r.preview,
+          };
+        } catch (err) { this.fail(err); }
+      },
+      editInfo(d) {
+        this.form = { open: true, title: 'Info dokumen', id: d.id, jenis: d.jenis, judul: d.judul, pemilik: d.pemilik, catatan: d.catatan, nama_file: d.nama_file, mime: d.mime, b64: '', preview: '' };
+      },
+      async save() {
+        const f = this.form;
+        const meta = { jenis: f.jenis, judul: f.judul, pemilik: f.pemilik, catatan: f.catatan };
+        this.busy = true;
+        try {
+          if (f.id) await this.call('saveDocMeta', { id: f.id, ...meta });
+          else await this.call('uploadDoc', meta, f.b64, f.mime, f.nama_file);
+          f.open = false;
+          f.b64 = '';
+          Swal.fire({ toast: true, position: 'top', icon: 'success', title: 'Tersimpan', showConfirmButton: false, timer: 1200 });
+          await this.refresh();
+        } catch (e) { this.fail(e); } finally { this.busy = false; }
+      },
+      async removeDoc() {
+        const r = await Swal.fire({ title: 'Hapus dokumen ini?', text: 'File dipindah ke Trash Google Drive.', icon: 'warning', showCancelButton: true, confirmButtonText: 'Hapus', cancelButtonText: 'Batal', confirmButtonColor: '#B5472F' });
+        if (!r.isConfirmed) return;
+        try {
+          await this.call('removeDoc', this.form.id);
+          this.form.open = false;
+          await this.refresh();
+        } catch (e) { this.fail(e); }
+      },
+
+      /* ----- viewer ----- */
+      async open(d) {
+        this.closeView();
+        this.view = { open: true, id: d.id, name: d.judul, file: d.nama_file, mime: d.mime, url: '', isPdf: d.mime === 'application/pdf', zoom: 1, busy: true, error: '' };
+        stageEl = this.$refs.stage;
+        contentEl = this.$refs.content;
+        pagesEl = this.$refs.pages;
+        cz = 1; tx = 0; ty = 0;
+        contentEl.style.width = '100%';
+        contentEl.style.transform = '';
+        try {
+          const f = await this.call('getDocFile', d.id);
+          bytes = b64ToBytes(f.b64);
+          blob = new Blob([bytes], { type: f.mime });
+          this.view.url = URL.createObjectURL(blob);
+          if (this.view.isPdf) await this.showPdf();
+        } catch (e) {
+          this.view.error = 'Gagal memuat dokumen. Coba lagi.';
+        }
+        this.view.busy = false;
+        this.place();
+      },
+      async showPdf() {
+        const lib = await loadPdfJs();
+        pdf = await lib.getDocument({ data: bytes.slice() }).promise;
+        const frag = document.createDocumentFragment();
+        await buildPages(frag, stageEl.clientWidth);
+        pagesEl.replaceChildren(frag);
+      },
+
+      // Menjaga dokumen tetap di dalam layar: terpusat jika lebih kecil dari layar, tidak keluar batas jika lebih besar.
+      place() {
+        if (!contentEl) return;
+        const W = stageEl.clientWidth, H = stageEl.clientHeight, z = this.view.zoom;
+        const cw = W * z, ch = contentEl.offsetHeight * z / cz;
+        tx = cw <= W ? (W - cw) / 2 : Math.min(0, Math.max(W - cw, tx));
+        ty = ch <= H ? 0 : Math.min(0, Math.max(H - ch, ty));
+        // Zoom live hanya memakai transform (GPU), tanpa mengubah ukuran layout.
+        contentEl.style.transform = `translate(${tx}px, ${ty}px) scale(${z / cz})`;
+      },
+      // Zoom berpusat di titik (cx, cy) pada layar.
+      zoomAt(z, cx, cy) {
+        const k1 = this.view.zoom / cz;
+        const ax = (cx - tx) / k1, ay = (cy - ty) / k1;
+        this.view.zoom = Math.min(MAX_ZOOM, Math.max(1, z));
+        const k2 = this.view.zoom / cz;
+        tx = cx - ax * k2;
+        ty = cy - ay * k2;
+        this.place();
+        clearTimeout(timer);
+        timer = setTimeout(() => this.commit(), 220);
+      },
+      zoomBy(k) { this.zoomAt(this.view.zoom * k, stageEl.clientWidth / 2, stageEl.clientHeight / 2); },
+      resetZoom() { this.zoomAt(1, stageEl.clientWidth / 2, stageEl.clientHeight / 2); },
+
+      // Setelah gesture berhenti, dokumen disusun ulang di resolusi tajam. Transform kembali ke 1 dengan posisi yang sama, jadi tampilan tidak berubah.
+      async commit() {
+        const z = this.view.zoom;
+        if (z === cz) return;
+        const my = ++token;
+        const W = stageEl.clientWidth;
+        if (this.view.isPdf && pdf) {
+          const frag = document.createDocumentFragment();
+          await buildPages(frag, W * z);
+          if (my !== token) return;
+          pagesEl.replaceChildren(frag);
+        }
+        cz = z;
+        contentEl.style.width = W * z + 'px';
+        this.place();
+      },
+
+      touchStart(e) {
+        const t = e.touches;
+        if (t.length === 2) {
+          pinch = { d: dist(t), z: this.view.zoom };
+          drag = null;
+        } else if (t.length === 1) {
+          const p = pt(t);
+          const now = Date.now();
+          if (now - lastTap < 300) {
+            this.zoomAt(this.view.zoom > 1 ? 1 : 2.5, p.x, p.y);
+            lastTap = 0;
+          } else {
+            lastTap = now;
+          }
+          drag = p;
+        }
+      },
+      touchMove(e) {
+        const t = e.touches;
+        if (t.length === 2 && pinch) {
+          e.preventDefault();
+          const c = mid(t);
+          this.zoomAt(pinch.z * dist(t) / pinch.d, c.x, c.y);
+        } else if (t.length === 1 && drag && this.view.zoom > 1) {
+          e.preventDefault();
+          const p = pt(t);
+          tx += p.x - drag.x;
+          ty += p.y - drag.y;
+          drag = p;
+          this.place();
+        }
+      },
+      touchEnd(e) {
+        const t = e.touches;
+        if (t.length < 2) pinch = null;
+        drag = t.length === 1 ? pt(t) : null;
+      },
+
+      closeView() {
+        clearTimeout(timer);
+        token++;
+        if (this.view.url) URL.revokeObjectURL(this.view.url);
+        pdf?.destroy();
+        pdf = null; bytes = null; blob = null;
+        if (pagesEl) pagesEl.replaceChildren();
+        this.view.open = false;
+        this.view.url = '';
+      },
+      download() {
+        const a = document.createElement('a');
+        a.href = this.view.url;
+        a.download = this.view.file;
+        document.body.appendChild(a);
+        a.click();
+        a.remove();
+      },
+      async share() {
+        try {
+          await navigator.share({ files: [new File([blob], this.view.file, { type: this.view.mime })], title: this.view.name });
+        } catch (e) {
+          if (e.name !== 'AbortError') this.download();
+        }
+      },
+      editFromView() {
+        const d = this.items.find(x => x.id === this.view.id);
+        this.closeView();
+        if (d) this.editInfo(d);
+      },
+    };
+  });
+});
+</script>

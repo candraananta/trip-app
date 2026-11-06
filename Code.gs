@@ -47,9 +47,13 @@ const SEED = {
 
 /* ---------- WEB APP ---------- */
 function doGet() {
-  return HtmlService.createHtmlOutputFromFile('Index')
+  return HtmlService.createTemplateFromFile('Index').evaluate()
     .setTitle(CONFIG.TRIP_NAME)
     .addMetaTag('viewport', 'width=device-width, initial-scale=1, viewport-fit=cover');
+}
+
+function include(name) {
+  return HtmlService.createHtmlOutputFromFile(name).getContent();
 }
 
 /* ---------- SETUP (jalankan sekali dari editor, aman dijalankan ulang) ---------- */

@@ -24,15 +24,19 @@
   .seg button.on { background: #17202A; color: #F5F6F2; }
   .btn { width: 100%; border-radius: 12px; padding: 14px; font-weight: 600; background: #17202A; color: #F5F6F2; }
   .btn:disabled { opacity: .5; }
+  .zbtn { min-width: 44px; height: 44px; border-radius: 12px; border: 1px solid rgba(246,246,242,.2); font-size: 18px; color: #F5F6F2; padding: 0 10px; }
 </style>
 </head>
 
 <body x-data="app()" x-cloak class="bg-paper text-ink">
 <div class="mx-auto min-h-dvh max-w-md pb-32">
 
-  <header class="px-5 pb-3 pt-[calc(env(safe-area-inset-top)+1.5rem)]">
-    <h1 class="text-2xl font-semibold tracking-tight" x-text="s.trip || 'Trip'"></h1>
-    <p class="num mt-0.5 text-sm text-mute" x-text="rangeText"></p>
+  <header class="flex items-start justify-between px-5 pb-3 pt-[calc(env(safe-area-inset-top)+1.5rem)]">
+    <div>
+      <h1 class="text-2xl font-semibold tracking-tight" x-text="s.trip || 'Trip'"></h1>
+      <p class="num mt-0.5 text-sm text-mute" x-text="rangeText"></p>
+    </div>
+    <button class="mt-1 text-sm font-medium text-teal" @click="tab = 'data'">Pengaturan</button>
   </header>
 
   <p x-show="loading" class="px-5 py-12 text-mute">Memuat data…</p>
@@ -174,6 +178,9 @@
       </template>
     </ul>
   </section>
+
+  <!-- MODUL DOKUMEN (dari DocsPanel.html) -->
+  <?!= include('DocsPanel'); ?>
 </div>
 
 <!-- NAV BAWAH -->
@@ -185,11 +192,11 @@
       <button class="-mt-6 grid h-14 w-14 place-items-center rounded-full bg-teal text-3xl leading-none text-paper" aria-label="Catat pengeluaran" @click="openEd('exp')">+</button>
     </div>
     <button class="py-3" :class="tab === 'exp' ? 'text-ink' : 'text-mute'" @click="tab = 'exp'">Pengeluaran</button>
-    <button class="py-3" :class="tab === 'data' ? 'text-ink' : 'text-mute'" @click="tab = 'data'">Data</button>
+    <button class="py-3" :class="tab === 'docs' ? 'text-ink' : 'text-mute'" @click="tab = 'docs'; $dispatch('open-docs')">Dokumen</button>
   </div>
 </nav>
 
-<!-- FORM (BOTTOM SHEET) -->
+<!-- FORM TRANSAKSI (BOTTOM SHEET) -->
 <div x-show="ed.open" x-cloak class="fixed inset-0 z-50">
   <div class="absolute inset-0 bg-ink/30" @click="ed.open = false"></div>
   <form class="absolute inset-x-0 bottom-0 mx-auto max-h-[92dvh] max-w-md overflow-y-auto rounded-t-2xl bg-paper px-5 pb-[max(1.25rem,env(safe-area-inset-bottom))] pt-4" @submit.prevent="save()">
@@ -217,7 +224,7 @@
         <div><span class="lbl">Setara</span><p class="num py-3 text-[17px]" x-text="rp((ed.f.nominal || 0) * (ed.f.kurs || 0))"></p></div>
       </div>
 
-      <!-- tanggal & jam (pengeluaran dan rencana) -->
+      <!-- tanggal & jam -->
       <div x-show="isTx" class="grid grid-cols-2 gap-3">
         <label><span class="lbl">Tanggal</span><input type="date" class="fld" x-model="ed.f.tanggal"></label>
         <label x-show="isPlan"><span class="lbl">Jam</span><input type="time" class="fld" x-model="ed.f.jam"></label>
